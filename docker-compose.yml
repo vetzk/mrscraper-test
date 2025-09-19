@@ -1,0 +1,118 @@
+version: "3.9"
+
+services:
+    rabbitmq:
+        image: rabbitmq:3-management
+        container_name: rabbitmq
+        ports:
+            - "5672:5672"
+            - "15672:15672"
+        environment:
+            RABBITMQ_DEFAULT_USER: guest
+            RABBITMQ_DEFAULT_PASS: guest
+        volumes:
+            - rabbitmq_data:/var/lib/rabbitmq
+        healthcheck:
+            test: ["CMD", "rabbitmqctl", "status"]
+            interval: 30s
+            timeout: 10s
+            retries: 5
+            start_period: 30s
+
+    redis:
+        image: redis:7-alpine
+        container_name: redis
+        ports:
+            - "6379:6379"
+        command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    mysql:
+        image: mysql:8
+        container_name: mysql
+        ports:
+            - "3307:3306"
+        environment:
+            MYSQL_ROOT_PASSWORD: root
+            MYSQL_DATABASE: penamrscraper
+            MYSQL_USER: vetz33
+            MYSQL_PASSWORD: Zenithvetz12.
+        volumes:
+            - mysql_data:/var/lib/mysql
+        command: >
+            --max-connections=300
+            --innodb-buffer-pool-size=512M
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "mysqladmin",
+                    "ping",
+                    "-h",
+                    "localhost",
+                    "-uroot",
+                    "-proot",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 10
+            start_period: 60s
+
+    product-service:
+        build: ./product-service
+        container_name: product-service
+        depends_on:
+            mysql:
+                condition: service_healthy
+            rabbitmq:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        environment:
+            MYSQL_HOST: mysql
+            MYSQL_PORT: 3306
+            MYSQL_USER: vetz33
+            MYSQL_PASSWORD: Zenithvetz12.
+            MYSQL_DATABASE: penamrscraper
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+            GOMAXPROCS: 2
+            GOGC: 100
+        ports:
+            - "3000:3000"
+
+    order-service:
+        build: ./order-service
+        container_name: order-service
+        depends_on:
+            mysql:
+                condition: service_healthy
+            rabbitmq:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+            product-service:
+                condition: service_started
+        environment:
+            MYSQL_HOST: mysql
+            MYSQL_PORT: 3306
+            MYSQL_USER: vetz33
+            MYSQL_PASSWORD: Zenithvetz12.
+            MYSQL_DATABASE: penamrscraper
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+            PRODUCT_SERVICE_URL: http://product-service:3000
+            GOMAXPROCS: 4
+            GOGC: 100
+        ports:
+            - "8080:8080"
+
+volumes:
+    mysql_data:
+    rabbitmq_data:
