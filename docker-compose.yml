@@ -12,8 +12,14 @@ services:
             RABBITMQ_DEFAULT_PASS: guest
         volumes:
             - rabbitmq_data:/var/lib/rabbitmq
+        # Remove custom config for now - use defaults
+        deploy:
+            resources:
+                limits:
+                    memory: 2G
+                    cpus: "2"
         healthcheck:
-            test: ["CMD", "rabbitmqctl", "status"]
+            test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
             interval: 30s
             timeout: 10s
             retries: 5
@@ -24,7 +30,17 @@ services:
         container_name: redis
         ports:
             - "6379:6379"
-        command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+        command: >
+            redis-server 
+            --maxmemory 1gb 
+            --maxmemory-policy allkeys-lru
+            --tcp-keepalive 60
+            --timeout 0
+        deploy:
+            resources:
+                limits:
+                    memory: 1.5G
+                    cpus: "2"
         healthcheck:
             test: ["CMD", "redis-cli", "ping"]
             interval: 10s
@@ -43,9 +59,24 @@ services:
             MYSQL_PASSWORD: Zenithvetz12.
         volumes:
             - mysql_data:/var/lib/mysql
+        # Minimal MySQL 8.x compatible settings
         command: >
-            --max-connections=300
-            --innodb-buffer-pool-size=512M
+            --max-connections=2000
+            --innodb-buffer-pool-size=1G
+            --innodb-redo-log-capacity=512M
+            --innodb-log-buffer-size=64M
+            --innodb-flush-log-at-trx-commit=2
+            --tmp-table-size=128M
+            --max-heap-table-size=128M
+            --thread-cache-size=50
+            --table-open-cache=2000
+            --skip-name-resolve
+            --performance-schema=OFF
+        deploy:
+            resources:
+                limits:
+                    memory: 2G
+                    cpus: "2"
         healthcheck:
             test:
                 [
@@ -81,10 +112,24 @@ services:
             REDIS_HOST: redis
             REDIS_PORT: 6379
             RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-            GOMAXPROCS: 2
-            GOGC: 100
+            GOMAXPROCS: 4
+            GOGC: 50
+            DB_MAX_OPEN_CONNS: 200
+            DB_MAX_IDLE_CONNS: 40
+            REDIS_POOL_SIZE: 200
+        deploy:
+            resources:
+                limits:
+                    memory: 1G
+                    cpus: "2"
         ports:
             - "3000:3000"
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 40s
 
     order-service:
         build: ./order-service
@@ -97,7 +142,7 @@ services:
             redis:
                 condition: service_healthy
             product-service:
-                condition: service_started
+                condition: service_healthy
         environment:
             MYSQL_HOST: mysql
             MYSQL_PORT: 3306
@@ -109,9 +154,33 @@ services:
             RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
             PRODUCT_SERVICE_URL: http://product-service:3000
             GOMAXPROCS: 4
-            GOGC: 100
+            GOGC: 50
+            # Database settings
+            DB_MAX_OPEN_CONNS: 100
+            DB_MAX_IDLE_CONNS: 20
+            DB_CONN_MAX_LIFETIME: 60s
+            DB_CONN_MAX_IDLE_TIME: 30s
+            # Redis settings
+            REDIS_POOL_SIZE: 400
+            REDIS_MIN_IDLE: 40
+            REDIS_DIAL_TIMEOUT: 1s
+            REDIS_READ_TIMEOUT: 50ms
+            REDIS_WRITE_TIMEOUT: 50ms
+            # Product client timeout
+            PRODUCT_CLIENT_TIMEOUT: 150ms
+        deploy:
+            resources:
+                limits:
+                    memory: 2G
+                    cpus: "4"
         ports:
             - "8080:8080"
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 40s
 
 volumes:
     mysql_data:
